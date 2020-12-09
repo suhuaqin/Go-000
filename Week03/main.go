@@ -12,19 +12,13 @@ import (
 )
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	g, _ := errgroup.WithContext(ctx)
-
 	s := http.Server{}
+
+	g, _ := errgroup.WithContext(context.Background())
+
 	//启动服务
 	g.Go(func() error {
-		err := s.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			//其他原因退出，通过ctx让监听signal的gourtine退出
-			cancel()
-		}
-		return err
+		return s.ListenAndServe()
 	})
 
 	//监听signal信号
@@ -32,16 +26,15 @@ func main() {
 		// 用quit监听signal信号
 		quit := make(chan os.Signal)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case <-quit:
-			// 使用超时ctx，让服务能在最后秒处理shutdown前进来的请求
-			ctx1, cancle1 := context.WithTimeout(ctx, 5*time.Second)
-			defer cancle1()
-			return s.Shutdown(ctx1)
-		case <-ctx.Done():
-			return nil
-		}
+		<-quit
+
+		// 使用超时 ctx，让服务能在最后 5S 处理 shutdown 前进来的请求
+		// 为了避免集联取消，这里特地新生成一下root ctx
+		ctx, cancle := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancle()
+		return s.Shutdown(ctx)
 	})
 
-	fmt.Println(g.Wait())
+	err := g.Wait()
+	fmt.Println(err)
 }
